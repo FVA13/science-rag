@@ -9,10 +9,12 @@ version = "0.1.0"
 [tasks]
 
 [dependencies]
-python = "==3.11.0"
+python = ">=3.11.11,<3.12"
 langchain = ">=0.3.9,<0.4"
 pandas = ">=2.2.3,<3"
 numpy = ">=1.26.4,<2"
+jupyterlab = ">=4.3.2,<4.4"
+ipykernel = ">=6.29.5,<6.30"
 
 [pypi-dependencies]
 langchain-community = ">=0.3.4, <0.4"
@@ -22,7 +24,7 @@ spacy = ">=3.7.5, <4"
 seaborn = ">=0.13.2, <0.14"
 matplotlib = ">=3.9.3, <4"
 langchain-chroma = ">=0.1.4, <0.2"
-langchain-openai = ">=0.2.10, <0.3"
+langchain-openai = ">=0.2.11, <0.3"
 arxiv = ">=2.1.3, <3"
 langchain-huggingface = ">=0.1.2, <0.2"
 vllm = ">=0.6.4.post1, <0.7"
@@ -31,3 +33,10 @@ torch = "==2.5.1"
 langgraph = ">=0.2.53, <0.3"
 faiss-cpu = ">=1.9.0.post1, <2"
 python-dotenv = ">=1.0.1, <2"
+pymupdf = ">=1.24.14, <2"
+duckduckgo-search = ">=6.3.7, <7"
+
+[feature.test.dependencies]
+pylint = "*"
+black = "*"
+pre-commit = "*"
