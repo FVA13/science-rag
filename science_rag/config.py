@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -5,6 +6,9 @@ from loguru import logger
 
 # Load environment variables from .env file if it exists
 load_dotenv()
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+SB_AUTH_DATA = os.environ.get("SB_AUTH_DATA")
+LANGCHAIN_API_KEY = os.environ.get("LANGCHAIN_API_KEY")
 
 # Paths
 PROJ_ROOT = Path(__file__).resolve().parents[1]
