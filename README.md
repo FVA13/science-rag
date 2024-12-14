@@ -7,8 +7,11 @@
 The RAG-system specialized in answering scientific question.
 A user asks a question on scientific topic and receives an answer based on relevant articles with links attached.
 
+Run chatbot with:
+`pixi run python science_rag/llm_agent.py`
+
 Stack:
-- *pixi* for environment and dependencies management 
+- *pixi* for environment and dependencies management
 
 ## Project Organization
 
@@ -22,7 +25,7 @@ Stack:
 │
 ├── notebooks          <- Jupyter notebooks with experiments
 │
-├── pyproject.toml     <- Project configuration file with package metadata for 
+├── pyproject.toml     <- Project configuration file with package metadata for
 │                         science_rag and configuration for tools like black
 │
 ├── references         <- Data dictionaries, manuals, and all other explanatory materials.
