@@ -1,18 +1,37 @@
 import time
 import warnings
-from typing import List, Dict, Optional
-from datetime import datetime
-
+from enum import Enum
+from typing import Optional
 from dotenv import load_dotenv
-from langchain.tools import tool
-from langchain.chat_models import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.pydantic_v1 import BaseModel, Field
+
+from langchain.chat_models import (
+    ChatOpenAI,
+    ChatAnthropic,
+    ChatGooglePalm,
+)
+from langchain.prompts import PromptTemplate
+from langchain_community.chat_models import ChatOllama
+from langchain_core.prompts import (
+    ChatPromptTemplate,
+    MessagesPlaceholder,
+)
 from langchain_community.tools import DuckDuckGoSearchRun
-from langchain_community.retrievers import ArxivRetriever
 from langchain.memory import ConversationBufferWindowMemory
-from langchain.schema import HumanMessage, SystemMessage, AIMessage
-from langchain.agents import AgentExecutor, create_openai_functions_agent
+from langchain.schema import (
+    HumanMessage,
+    SystemMessage,
+    AIMessage,
+)
+from langchain.agents import (
+    AgentExecutor,
+    create_openai_functions_agent,
+    create_react_agent,
+)
+
+from tools import (
+    retrieve_arxiv_papers,
+    retrieve_arxiv_paper_by_id,
+)
 
 # Load environment variables
 load_dotenv()
@@ -20,54 +39,105 @@ load_dotenv()
 # Suppress warnings
 warnings.filterwarnings("ignore")
 
-class ArxivMetadata(BaseModel):
-    """Schema for arXiv paper metadata"""
-    entry_id: str = Field(..., alias="Entry_ID")
-    published: datetime = Field(..., alias="Published")
-    title: str = Field(..., alias="Title")
-    authors: str = Field(..., alias="Authors")
 
-    class Config:
-        allow_population_by_field_name = True
+class ModelProvider(Enum):
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    GOOGLE = "google"
+    OLLAMA = "ollama"
 
-class RetrievedArxivDoc(BaseModel):
-    """Schema for retrieved arXiv document"""
-    metadata: ArxivMetadata
-    page_content: Optional[str] = None
-
-    class Config:
-        arbitrary_types_allowed = True
-
-    def dict(self, *args, **kwargs):
-        d = super().dict(*args, **kwargs)
-        d['metadata']['Published'] = d['metadata']['Published'].isoformat()
-        return d
 
 class ScienceAgent:
-    """Science Agent for handling scientific queries and paper retrieval"""
+    def __init__(
+            self,
+            provider: str = "openai",
+            model_name: Optional[str] = None,
+            temperature: float = 0.4,
+            base_url: Optional[str] = None,
+    ):
+        self.provider = ModelProvider(provider.lower())
 
-    def __init__(self, model_name: str = 'gpt-4o-mini', temperature: float = 0.4):
-        self.llm = ChatOpenAI(
-            model=model_name,
-            temperature=temperature,
-            max_retries=2,
-        )
-        self.tools = [self._retrieve_arxiv_papers, DuckDuckGoSearchRun()]
-        self.prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", "You are a science agent. Your task is to provide a user with arxiv-driven data. "
-                           "Prove your words by attaching the reference to articles (from metadata)."),
-                MessagesPlaceholder(variable_name="chat_history"),
-                ("human", "{input}"),
-                MessagesPlaceholder(variable_name="agent_scratchpad"),
-            ]
-        )
+        default_models = {
+            ModelProvider.OPENAI: "gpt-4",
+            ModelProvider.ANTHROPIC: "claude-2",
+            ModelProvider.GOOGLE: "models/chat-bison-001",
+            ModelProvider.OLLAMA: "llama2",
+        }
+
+        self.model_name = model_name or default_models[self.provider]
+
+        # Initialize the appropriate chat model based on provider
+        if self.provider == ModelProvider.OPENAI:
+            self.llm = ChatOpenAI(
+                model=self.model_name,
+                temperature=temperature,
+                max_retries=2,
+            )
+        elif self.provider == ModelProvider.ANTHROPIC:
+            self.llm = ChatAnthropic(
+                model=self.model_name,
+                temperature=temperature,
+            )
+        elif self.provider == ModelProvider.GOOGLE:
+            self.llm = ChatGooglePalm(
+                model_name=self.model_name,
+                temperature=temperature,
+            )
+        elif self.provider == ModelProvider.OLLAMA:
+            self.llm = ChatOllama(
+                model=self.model_name,
+                temperature=temperature,
+                base_url=base_url or "http://localhost:11434",
+            )
+
+        self.tools = [retrieve_arxiv_papers, retrieve_arxiv_paper_by_id, DuckDuckGoSearchRun()]
+
+        # Different prompt template for Ollama
+        if self.provider == ModelProvider.OLLAMA:
+            # ReAct prompt template
+            template = """Answer the following questions as best you can. You have access to the following tools:
+
+            {tools}
+
+            Use the following format:
+
+            Question: the input question you must answer
+            Thought: you should always think about what to do
+            Action: the action to take, should be one of [{tool_names}]
+            Action Input: the input to the action
+            Observation: the result of the action
+            ... (this Thought/Action/Observation can repeat N times)
+            Thought: I now know the final answer
+            Final Answer: the final answer to the original input question
+
+            Begin!
+
+            Previous conversation history:
+            {chat_history}
+
+            Question: {input}
+            {agent_scratchpad}"""
+
+            self.prompt = PromptTemplate.from_template(template)
+            self.agent = create_react_agent(self.llm, self.tools, self.prompt)
+        else:
+            self.prompt = ChatPromptTemplate.from_messages(
+                [
+                    ("system", "You are a science agent. Your task is to provide a user with arxiv-driven data. "
+                               "Prove your words by attaching the reference to articles (from metadata)."),
+                    MessagesPlaceholder(variable_name="chat_history"),
+                    ("human", "{input}"),
+                    MessagesPlaceholder(variable_name="agent_scratchpad"),
+                ]
+            )
+            self.agent = create_openai_functions_agent(self.llm, self.tools, self.prompt)
+
         self.memory = ConversationBufferWindowMemory(
             k=5,
             memory_key="chat_history",
             return_messages=True,
         )
-        self.agent = create_openai_functions_agent(self.llm, self.tools, self.prompt)
+
         self.agent_executor = AgentExecutor(
             agent=self.agent,
             tools=self.tools,
@@ -76,52 +146,14 @@ class ScienceAgent:
             handle_parsing_errors=True,
         )
 
-    @staticmethod
-    @tool
-    def _retrieve_arxiv_papers(
-            query: str,
-            load_max_docs: int = 2,
-            get_full_documents: bool = False,
-    ) -> List[RetrievedArxivDoc]:
-        """
-        Retrieve top papers from arXiv based on the query.
-
-        Args:
-            query: Search query string
-            load_max_docs: Maximum number of documents to retrieve
-            get_full_documents: Whether to fetch full documents or just abstracts
-
-        Returns:
-            List of retrieved arXiv documents
-        """
-        retriever = ArxivRetriever(
-            load_max_docs=load_max_docs,
-            get_full_documents=get_full_documents,
-        )
-        response = retriever.invoke(query)
-        return [
-            {
-                'metadata': {
-                    **doc.metadata,
-                    'Published': str(doc.metadata['Published'])
-                },
-                'page_content': doc.page_content
-            }
-            for doc in response
-        ]
-
     def chat(self, history: bool = True):
-        """
-        Interactive chat interface for the agent.
-
-        Args:
-            history: Whether to maintain chat history
-        """
         chat_history = [
-            SystemMessage(content="You're a helpful scientific assistant. Provide accurate and detailed responses to queries.")
+            SystemMessage(
+                content="You're a helpful scientific assistant. Provide accurate and detailed responses to queries.")
         ]
 
-        print("Welcome to Science Agent! (Press Enter twice to exit)")
+        print(f"Welcome to Science Agent! Using {self.provider.value} provider with {self.model_name} model")
+        print("(Press Enter twice to exit)")
 
         while True:
             try:
@@ -152,10 +184,26 @@ class ScienceAgent:
 
             time.sleep(0.2)
 
+
 def main():
     """Main entry point"""
-    agent = ScienceAgent()
+    # Example usage with different providers:
+
+    # OpenAI
+    # agent = ScienceAgent(provider="openai", model_name="gpt-4")
+
+    # Anthropic
+    # agent = ScienceAgent(provider="anthropic", model_name="claude-2")
+
+    # Google
+    # agent = ScienceAgent(provider="google", model_name="chat-bison")
+
+    # Ollama (locally deployed)
+    agent = ScienceAgent(provider="ollama", model_name="llama3", base_url="http://localhost:11434")
+
+    # Default (OpenAI)
     agent.chat()
+
 
 if __name__ == '__main__':
     main()
