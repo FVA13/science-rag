@@ -71,6 +71,7 @@ def handle_model_provider(message: types.Message):
 @bot.message_handler(state=ModelStates.model_provider)
 def handle_model_provider_selection(message: types.Message):
     selected_provider = message.text
+    llm_agent.llm_provider = selected_provider
     bot.send_message(
         chat_id=message.chat.id,
         text=f"You have selected {selected_provider} as your LLM provider.",
